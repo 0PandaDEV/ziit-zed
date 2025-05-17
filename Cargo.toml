@@ -5,7 +5,24 @@ edition = "2021"
 
 [lib]
 crate-type = ["cdylib"]
-name = "ziit_zed_extension"
+
+[[bin]]
+name = "ziit-ls"
+path = "src/language_server.rs"
 
 [dependencies]
 zed_extension_api = "0.5.0"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+chrono = { version = "0.4.41", features = ["serde"] }
+log = "0.4.27"
+dirs = "6.0.0"
+tokio = { version = "1.45.0", features = ["full"] }
+anyhow = "1.0.98"
+
+tower-lsp = "0.20.0"
+arc-swap = "1.7.1"
+url = "2.5.4"
+
+[workspace]
+members = ["."]
