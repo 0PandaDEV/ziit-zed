@@ -1,0 +1,7 @@
+id = "ziit"
+name = "Ziit"
+version = "1.0.0"
+schema_version = 1
+authors = ["PandaDEV <contact@pandadev.net>"]
+description = "The Swiss army knife of code time tracking."
+repository = "https://github.com/0pandadev/ziit-zed"

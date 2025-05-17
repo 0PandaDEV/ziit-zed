@@ -1,0 +1,11 @@
+[package]
+name = "ziit-zed"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+name = "ziit_zed_extension"
+
+[dependencies]
+zed_extension_api = "0.5.0"
