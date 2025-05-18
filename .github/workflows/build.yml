@@ -1,12 +1,20 @@
 name: Build
 
 permissions:
-  contents: read
+  contents: write
 
 on:
   pull_request:
   push:
+    tags:
+      - "v*"
   workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'Version tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+        type: string
 
 jobs:
   build-linux:
@@ -20,14 +28,30 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Get version
+        id: get_version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION=${{ github.event.inputs.version_tag }}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Build Linux binary
         run: cargo build --release --package ziit-ls
 
-      - name: Upload Linux binary
+      - name: Package binary
+        run: |
+          mkdir -p "ziit-ls-${{ steps.get_version.outputs.version }}"
+          cp target/release/ziit-ls "ziit-ls-${{ steps.get_version.outputs.version }}/"
+          zip -r "x86_64-unknown-linux-gnu.zip" "ziit-ls-${{ steps.get_version.outputs.version }}"
+
+      - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: x86_64-unknown-linux-gnu
-          path: target/release/ziit-ls
+          path: x86_64-unknown-linux-gnu.zip
           retention-days: 5
 
   build-macos:
@@ -41,14 +65,30 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build macOS (Intel) binary
+      - name: Get version
+        id: get_version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION=${{ github.event.inputs.version_tag }}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build macOS binary
         run: cargo build --release --package ziit-ls
 
-      - name: Upload macOS binary
+      - name: Package binary
+        run: |
+          mkdir -p "ziit-ls-${{ steps.get_version.outputs.version }}"
+          cp target/release/ziit-ls "ziit-ls-${{ steps.get_version.outputs.version }}/"
+          zip -r "x86_64-apple-darwin.zip" "ziit-ls-${{ steps.get_version.outputs.version }}"
+
+      - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: x86_64-apple-darwin
-          path: target/release/ziit-ls
+          path: x86_64-apple-darwin.zip
           retention-days: 5
 
   build-windows:
@@ -62,12 +102,62 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Get version
+        id: get_version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION=${{ github.event.inputs.version_tag }}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Build Windows binary
         run: cargo build --release --package ziit-ls
 
-      - name: Upload Windows binary
+      - name: Package binary
+        shell: bash
+        run: |
+          mkdir -p "ziit-ls-${{ steps.get_version.outputs.version }}"
+          cp target/release/ziit-ls.exe "ziit-ls-${{ steps.get_version.outputs.version }}/"
+          7z a -tzip "x86_64-pc-windows-msvc.zip" "ziit-ls-${{ steps.get_version.outputs.version }}"
+
+      - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: x86_64-pc-windows-msvc
-          path: target/release/ziit-ls.exe
-          retention-days: 5 
+          path: x86_64-pc-windows-msvc.zip
+          retention-days: 5
+
+  release:
+    needs: [build-linux, build-macos, build-windows]
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get version
+        id: get_version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION=${{ github.event.inputs.version_tag }}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          name: Release ${{ steps.get_version.outputs.version }}
+          files: |
+            artifacts/x86_64-unknown-linux-gnu.zip
+            artifacts/x86_64-apple-darwin.zip
+            artifacts/x86_64-pc-windows-msvc.zip
+          generate_release_notes: true 
