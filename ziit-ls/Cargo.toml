@@ -2,7 +2,6 @@
 name = "ziit-ls"
 version = "1.0.0"
 edition = "2021"
-license-file = "../LICENSE"
 repository = "https://github.com/0pandadev/ziit-zed"
 
 [dependencies]
