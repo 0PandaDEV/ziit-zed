@@ -1,0 +1,38 @@
+name: Build
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build extension
+        run: cargo build --release
+        
+      - name: Prepare artifacts
+        id: prepare-artifacts
+        run: |
+          mkdir -p artifacts
+          cp -r target/release/* artifacts/ || true
+          echo "files_path=artifacts" >> $GITHUB_OUTPUT
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: ${{ steps.prepare-artifacts.outputs.files_path }}
+          retention-days: 5 
