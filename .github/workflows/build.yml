@@ -10,16 +10,7 @@ on:
 
 jobs:
   build:
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-          - target: x86_64-apple-darwin
-            os: macos-latest
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,32 +19,51 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
-      - name: Install cargo-dist
+      - name: Setup cargo-dist
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-dist@0.28.0
 
-      - name: Build for target
-        run: cargo build --release --package ziit-ls --target ${{ matrix.target }}
+      - name: Run cargo-dist
+        run: |
+          dist build --output-format=json --allow-dirty > dist-manifest.json
+        env:
+          CARGO_DIST_MANIFEST_PATH: ./dist-workspace.toml
 
-      - name: Prepare artifacts (Unix)
-        if: runner.os != 'Windows'
+      - name: Collect artifacts
+        id: collect-artifacts
         run: |
           mkdir -p artifacts
-          cp target/${{ matrix.target }}/release/ziit-ls artifacts/
-          
-      - name: Prepare artifacts (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          mkdir -p artifacts
-          cp target/${{ matrix.target }}/release/ziit-ls.exe artifacts/
+          cp -r target/dist/* artifacts/ || true
 
-      - name: Upload build artifacts
+      - name: Upload combined artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ziit-ls-${{ matrix.target }}
+          name: all-artifacts
           path: artifacts
+          retention-days: 5
+
+      - name: Find individual binaries
+        run: |
+          for dir in artifacts/*; do
+            if [ -d "$dir" ]; then
+              target_name=$(basename "$dir")
+              echo "Processing $target_name"
+              mkdir -p "single-artifacts/$target_name"
+              
+              # Find the binary files and copy them
+              find "$dir" -type f -executable -o -name "*.exe" | while read binary; do
+                if [ -f "$binary" ]; then
+                  cp "$binary" "single-artifacts/$target_name/"
+                fi
+              done
+            fi
+          done
+
+      - name: Upload individual artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-only
+          path: single-artifacts
           retention-days: 5 
