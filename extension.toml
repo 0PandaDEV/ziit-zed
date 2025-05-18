@@ -6,8 +6,8 @@ authors = ["PandaDEV <contact@pandadev.net>"]
 description = "The Swiss army knife of code time tracking."
 repository = "https://github.com/0pandadev/ziit-zed"
 
-[language_servers.ziit]
-name = "ziit"
+[language_servers.lib]
+name = "Ziit Language Server"
 languages = [
     "ActionScript",
     "Ada",
