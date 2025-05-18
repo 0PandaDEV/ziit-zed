@@ -15,12 +15,19 @@ on:
         required: true
         default: 'v0.1.0'
         type: string
+      package_name:
+        description: 'Package name (leave empty for workspace-wide release)'
+        required: false
+        default: 'ziit-ls'
+        type: string
 
 jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.version_tag || 'v0.1.0' }}
+      version_tag: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.version_tag || 'v0.1.0' }}
+      package_name: ${{ github.event.inputs.package_name || 'ziit-ls' }}
+      full_tag: ${{ (github.event.inputs.package_name && format('{0}-{1}', github.event.inputs.package_name, github.event.inputs.version_tag || 'v0.1.0')) || github.event.inputs.version_tag || 'v0.1.0' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -33,17 +40,33 @@ jobs:
         with:
           tool: cargo-dist@0.28.0
 
+      - name: Set release tag
+        id: set_tag
+        run: |
+          VERSION_TAG="${{ github.event_name == 'push' && github.ref_name || github.event.inputs.version_tag || 'v0.1.0' }}"
+          PACKAGE_NAME="${{ github.event.inputs.package_name || 'ziit-ls' }}"
+          
+          if [ -n "$PACKAGE_NAME" ]; then
+            FULL_TAG="${PACKAGE_NAME}-${VERSION_TAG}"
+            echo "Using package-specific tag: $FULL_TAG"
+          else
+            FULL_TAG="${VERSION_TAG}"
+            echo "Using workspace-wide tag: $FULL_TAG"
+          fi
+          
+          echo "release_tag=$FULL_TAG" >> $GITHUB_OUTPUT
+          echo "version_tag=$VERSION_TAG" >> $GITHUB_OUTPUT
+          echo "package_name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
+
       - name: Configure build
         run: |
-          RELEASE_TAG="${{ github.event_name == 'push' && github.ref_name || github.event.inputs.version_tag || 'v0.1.0' }}"
-          dist host --steps=create --tag=$RELEASE_TAG --output-format=json > dist-manifest.json
+          dist host --steps=create --tag=${{ steps.set_tag.outputs.release_tag }} --output-format=json > dist-manifest.json
           echo "manifest=$(jq -c "." dist-manifest.json)" >> $GITHUB_OUTPUT
         id: config
 
       - name: Build artifacts
         run: |
-          RELEASE_TAG="${{ github.event_name == 'push' && github.ref_name || github.event.inputs.version_tag || 'v0.1.0' }}"
-          dist build --tag=$RELEASE_TAG --print=linkage --output-format=json > build-manifest.json
+          dist build --tag=${{ steps.set_tag.outputs.release_tag }} --print=linkage --output-format=json > build-manifest.json
 
       - name: Upload manifests
         uses: actions/upload-artifact@v4
@@ -74,7 +97,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
+        
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -84,8 +107,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          name: "Version ${{ needs.build.outputs.tag }}"
-          tag_name: ${{ needs.build.outputs.tag }}
+          name: "${{ needs.build.outputs.package_name }} ${{ needs.build.outputs.version_tag }}"
+          tag_name: ${{ needs.build.outputs.full_tag }}
           files: artifacts/build-artifacts/**/*
           generate_release_notes: true
           draft: false
