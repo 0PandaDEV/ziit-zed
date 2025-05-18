@@ -1,88 +1,149 @@
+use std::fs;
 use zed_extension_api::{self as zed, Command, Extension, LanguageServerId, Result, Worktree};
 
-pub mod api;
-pub mod config;
-pub mod heartbeat;
+struct ZiitExtension {
+    cached_binary_path: Option<String>,
+}
 
-const ZIIT_LANGUAGE_SERVER_NAME: &str = "ziit";
+impl ZiitExtension {
+    fn target_triple(&self, binary: &str) -> Result<String, String> {
+        let (platform, arch) = zed::current_platform();
+        let (arch, os) = {
+            let arch = match arch {
+                zed::Architecture::Aarch64 if binary == "ziit-ls" => "aarch64",
+                zed::Architecture::X8664 if binary == "ziit-ls" => "x86_64",
+                _ => return Err(format!("unsupported architecture: {arch:?}")),
+            };
 
-struct ZiitExtension {}
+            let os = match platform {
+                zed::Os::Mac if binary == "ziit-ls" => "apple-darwin",
+                zed::Os::Linux if binary == "ziit-ls" => "unknown-linux-gnu",
+                zed::Os::Windows if binary == "ziit-ls" => "pc-windows-msvc",
+                _ => return Err("unsupported platform".to_string()),
+            };
+
+            (arch, os)
+        };
+        
+        Ok(format!("{}-{}", arch, os))
+    }
+
+    fn download(
+        &self,
+        language_server_id: &LanguageServerId,
+        binary: &str,
+        repo: &str,
+    ) -> Result<String> {
+        let release = zed::latest_github_release(
+            repo,
+            zed::GithubReleaseOptions {
+                require_assets: true,
+                pre_release: false,
+            },
+        )?;
+
+        let target_triple = self.target_triple(binary)?;
+
+        let asset_name = format!("{target_triple}.zip");
+        let asset = release
+            .assets
+            .iter()
+            .find(|asset| asset.name == asset_name)
+            .ok_or_else(|| format!("no asset found matching {:?}", asset_name))?;
+
+        let version_dir = format!("{binary}-{}", release.version);
+        let binary_path = if binary == "wakatime-cli" {
+            format!("{version_dir}/{target_triple}")
+        } else {
+            format!("{version_dir}/{binary}")
+        };
+
+        if !fs::metadata(&binary_path).map_or(false, |stat| stat.is_file()) {
+            zed::set_language_server_installation_status(
+                language_server_id,
+                &zed::LanguageServerInstallationStatus::Downloading,
+            );
+
+            zed::download_file(
+                &asset.download_url,
+                &version_dir,
+                zed::DownloadedFileType::Zip,
+            )
+            .map_err(|err| format!("failed to download file: {err}"))?;
+
+            let entries = fs::read_dir(".")
+                .map_err(|err| format!("failed to list working directory {err}"))?;
+
+            for entry in entries {
+                let entry = entry.map_err(|err| format!("failed to load directory entry {err}"))?;
+                if let Some(file_name) = entry.file_name().to_str() {
+                    if file_name.starts_with(binary) && file_name != version_dir {
+                        fs::remove_dir_all(entry.path()).ok();
+                    }
+                }
+            }
+        }
+
+        zed::make_file_executable(&binary_path)?;
+
+        Ok(binary_path)
+    }
+
+    fn language_server_binary_path(
+        &mut self,
+        language_server_id: &LanguageServerId,
+        worktree: &Worktree,
+    ) -> Result<String> {
+        zed::set_language_server_installation_status(
+            language_server_id,
+            &zed::LanguageServerInstallationStatus::CheckingForUpdate,
+        );
+
+        if let Some(path) = worktree.which("ziit-ls") {
+            return Ok(path.clone());
+        }
+
+        let target_triple = self.target_triple("ziit-ls")?;
+        if let Some(path) = worktree.which(&target_triple) {
+            return Ok(path.clone());
+        }
+
+        if let Some(path) = &self.cached_binary_path {
+            if fs::metadata(path).map_or(false, |stat| stat.is_file()) {
+                return Ok(path.clone());
+            }
+        }
+
+        let binary_path =
+            self.download(language_server_id, "ziit-ls", "0PandaDEV/ziit-zed")?;
+
+        self.cached_binary_path = Some(binary_path.clone());
+
+        Ok(binary_path)
+    }
+}
 
 impl Extension for ZiitExtension {
     fn new() -> Self {
-        log::info!("Ziit Zed Extension Initialized");
-        Self {}
+        Self {
+            cached_binary_path: None,
+        }
     }
 
     fn language_server_command(
         &mut self,
-        _language_server_id: &LanguageServerId,
+        language_server_id: &LanguageServerId,
         worktree: &Worktree,
     ) -> Result<Command> {
-        let ls_path = "server_bin/ziit-ls";
-        let command_path = worktree.which(ls_path).ok_or_else(|| {
-            format!("Failed to find the ziit-ls binary. Expected at: '{}'", ls_path)
-        })?;
+        let binary_path = self.language_server_binary_path(language_server_id, worktree)?;
 
-        log::info!(
-            "Requesting Zed to start language server: {}",
-            command_path
-        );
+        let args = vec!["--standalone".to_string()];
+
         Ok(Command {
-            command: command_path,
-            args: vec![],
-            env: Default::default(),
+            command: binary_path,
+            args,
+            env: worktree.shell_env(),
         })
-    }
-
-    fn language_server_initialization_options(
-        &mut self,
-        language_server_id: &LanguageServerId,
-        _worktree: &Worktree,
-    ) -> Result<Option<serde_json::Value>> {
-        if language_server_id.as_ref() != ZIIT_LANGUAGE_SERVER_NAME {
-            return Err("Unsupported language server for initialization options".into());
-        }
-
-        let options_future = async {
-            match config::read_config_file().await {
-                Ok(config) => {
-                    log::info!(
-                        "Passing initialization options: apiKey present={}, baseUrl present={}",
-                        config.api_key.is_some(),
-                        config.base_url.is_some()
-                    );
-                    match serde_json::to_value(config) {
-                        Ok(val) => Some(val),
-                        Err(e) => {
-                            log::error!(
-                                "Failed to serialize config to JSON for LSP init options: {}",
-                                e
-                            );
-                            None
-                        }
-                    }
-                }
-                Err(e) => {
-                    log::error!("Failed to read config for LSP init options: {}", e);
-                    None
-                }
-            }
-        };
-
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => Ok(handle.block_on(options_future)),
-            Err(_) => {
-                log::warn!(
-                    "Not in a Tokio runtime for LSP init options, creating one shot runtime."
-                );
-                Ok(tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap()
-                    .block_on(options_future))
-            }
-        }
     }
 }
 

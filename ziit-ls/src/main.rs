@@ -1,16 +1,19 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Local, TimeDelta};
+use clap::{Arg, Command};
 use serde_json::Value;
+use tokio::io::{stdin as tokio_stdin, stdout as tokio_stdout};
 use tokio::sync::{Mutex, OnceCell};
 use tower_lsp::{jsonrpc, lsp_types::*, Client, LanguageServer, LspService, Server};
+use url::Url;
 
 mod api;
 mod config;
 mod heartbeat;
 
-use crate::config::ZiitConfig;
-use crate::heartbeat::HeartbeatManager;
+use config::ZiitConfig;
+use heartbeat::HeartbeatManager;
 
 const HEARTBEAT_DEBOUNCE_SECONDS: i64 = 120;
 
@@ -79,7 +82,7 @@ impl ZiitLanguageServer {
                 .await;
 
             let file_path = if uri_str.starts_with("file://") {
-                match url::Url::parse(&uri_str) {
+                match Url::parse(&uri_str) {
                     Ok(parsed_url) => parsed_url
                         .to_file_path()
                         .ok()
@@ -121,7 +124,7 @@ impl LanguageServer for ZiitLanguageServer {
             .await;
 
         if let Some(init_options) = params.initialization_options {
-            if let Ok(mut current_config) = crate::config::read_config_file().await {
+            if let Ok(mut current_config) = config::read_config_file().await {
                 self.client
                     .log_message(
                         MessageType::LOG,
@@ -156,7 +159,7 @@ impl LanguageServer for ZiitLanguageServer {
                 }
 
                 if config_changed {
-                    if let Err(e) = crate::config::write_config_file(&current_config).await {
+                    if let Err(e) = config::write_config_file(&current_config).await {
                         self.client
                             .log_message(
                                 MessageType::ERROR,
@@ -190,7 +193,7 @@ impl LanguageServer for ZiitLanguageServer {
                     new_config_populated = true;
                 }
                 if new_config_populated {
-                    if let Err(e) = crate::config::write_config_file(&new_config).await {
+                    if let Err(e) = config::write_config_file(&new_config).await {
                         self.client
                             .log_message(
                                 MessageType::ERROR,
@@ -316,14 +319,30 @@ impl LanguageServer for ZiitLanguageServer {
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 async fn main() {
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
+    let matches = Command::new("ziit-ls")
+        .version(env!("CARGO_PKG_VERSION"))
+        .author("PandaDEV <contact@pandadev.net>")
+        .about("Ziit language server for Zed")
+        .arg(
+            Arg::new("standalone")
+                .long("standalone")
+                .help("Run in standalone mode")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .get_matches();
+
+    if matches.get_flag("standalone") {
+        eprintln!("Ziit Language Server starting in standalone mode...");
+    } else {
+        eprintln!("Ziit Language Server starting...");
+    }
+
+    let stdin = tokio_stdin();
+    let stdout = tokio_stdout();
 
     let (service, socket) = LspService::build(ZiitLanguageServer::new).finish();
 
-    eprintln!("Ziit Language Server starting...");
-
     Server::new(stdin, stdout, socket).serve(service).await;
-}
+} 

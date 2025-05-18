@@ -1,0 +1,20 @@
+[package]
+name = "ziit-ls"
+version = "1.0.0"
+edition = "2021"
+license-file = "../LICENSE"
+repository = "https://github.com/0pandadev/ziit-zed"
+
+[dependencies]
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+chrono = { version = "0.4.41", features = ["serde"] }
+log = "0.4.27"
+dirs = "6.0.0"
+tokio = { version = "1.45.0", features = ["full"] }
+anyhow = "1.0.98"
+tower-lsp = "0.20.0"
+arc-swap = "1.7.1"
+url = "2.5.4"
+clap = "4.5.38"
+zed_extension_api = "0.5.0"
