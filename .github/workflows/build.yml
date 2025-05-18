@@ -20,66 +20,54 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup cargo-dist
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-dist@0.28.0
+      - name: Build Linux binary
+        run: cargo build --release --package ziit-ls
 
-      - name: Run cargo-dist
-        run: |
-          dist build --output-format=json --allow-dirty > dist-manifest.json
-        env:
-          CARGO_DIST_MANIFEST_PATH: ./dist-workspace.toml
-
-      - name: Extract binaries
-        run: |
-          mkdir -p binaries
-          
-          # Find and extract each architecture's binary
-          for target in aarch64-apple-darwin aarch64-unknown-linux-gnu x86_64-apple-darwin x86_64-unknown-linux-gnu x86_64-pc-windows-msvc; do
-            echo "Processing $target"
-            mkdir -p "binaries/$target"
-            
-            # Special handling for Windows
-            if [[ "$target" == *windows* ]]; then
-              find target/dist -path "*$target*" -name "*.exe" -exec cp {} "binaries/$target/" \;
-            else
-              # For Unix-like systems, find executable files
-              find target/dist -path "*$target*" -type f -executable -exec cp {} "binaries/$target/" \;
-            fi
-          done
-
-      - name: Upload aarch64-darwin
-        uses: actions/upload-artifact@v4
-        with:
-          name: aarch64-darwin
-          path: binaries/aarch64-apple-darwin
-          retention-days: 5
-          
-      - name: Upload aarch64-linux
-        uses: actions/upload-artifact@v4
-        with:
-          name: aarch64-linux
-          path: binaries/aarch64-unknown-linux-gnu
-          retention-days: 5
-          
-      - name: Upload x86_64-darwin
-        uses: actions/upload-artifact@v4
-        with:
-          name: x86_64-darwin
-          path: binaries/x86_64-apple-darwin
-          retention-days: 5
-          
-      - name: Upload x86_64-linux
+      - name: Upload Linux binary
         uses: actions/upload-artifact@v4
         with:
           name: x86_64-linux
-          path: binaries/x86_64-unknown-linux-gnu
+          path: target/release/ziit-ls
           retention-days: 5
-          
-      - name: Upload x86_64-windows
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build macOS (Intel) binary
+        run: cargo build --release --package ziit-ls
+
+      - name: Upload macOS binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: x86_64-darwin
+          path: target/release/ziit-ls
+          retention-days: 5
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Windows binary
+        run: cargo build --release --package ziit-ls
+
+      - name: Upload Windows binary
         uses: actions/upload-artifact@v4
         with:
           name: x86_64-windows
-          path: binaries/x86_64-pc-windows-msvc
+          path: target/release/ziit-ls.exe
           retention-days: 5 
