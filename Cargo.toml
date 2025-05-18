@@ -14,3 +14,7 @@ crate-type = ["cdylib"]
 
 [workspace]
 members = ["ziit-ls"]
+
+[profile.dist]
+inherits = "release"
+lto = "thin"

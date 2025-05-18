@@ -23,7 +23,7 @@ on:
       skip_version_check:
         description: 'Skip version checking (use if tag version differs from Cargo.toml)'
         required: false
-        default: false
+        default: true
         type: boolean
 
 jobs:
@@ -65,12 +65,7 @@ jobs:
 
       - name: Configure build
         run: |
-          DIST_CMD="dist host --steps=create --tag=${{ steps.set_tag.outputs.release_tag }} --output-format=json"
-          
-          if [ "${{ github.event.inputs.skip_version_check }}" == "true" ]; then
-            DIST_CMD="$DIST_CMD --allow-dirty"
-          fi
-          
+          DIST_CMD="dist host --steps=create --tag=${{ steps.set_tag.outputs.release_tag }} --output-format=json --allow-dirty"
           echo "Running: $DIST_CMD"
           $DIST_CMD > dist-manifest.json
           echo "manifest=$(jq -c "." dist-manifest.json)" >> $GITHUB_OUTPUT
@@ -78,12 +73,7 @@ jobs:
 
       - name: Build artifacts
         run: |
-          DIST_CMD="dist build --tag=${{ steps.set_tag.outputs.release_tag }} --print=linkage --output-format=json"
-          
-          if [ "${{ github.event.inputs.skip_version_check }}" == "true" ]; then
-            DIST_CMD="$DIST_CMD --allow-dirty"
-          fi
-          
+          DIST_CMD="dist build --tag=${{ steps.set_tag.outputs.release_tag }} --print=linkage --output-format=json --allow-dirty"
           echo "Running: $DIST_CMD"
           $DIST_CMD > build-manifest.json
 
