@@ -9,15 +9,20 @@ crate-type = ["cdylib"]
 [[bin]]
 name = "ziit-ls"
 path = "src/language_server.rs"
+required-features = ["native-ls-features"]
+
+[features]
+default = []
+native-ls-features = ["tokio/io-std"]
 
 [dependencies]
 zed_extension_api = "0.5.0"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
-chrono = { version = "0.4.41", features = ["serde"] }
+chrono = { version = "0.4.38", features = ["serde"] }
 log = "0.4.27"
 dirs = "6.0.0"
-tokio = { version = "1.45.0", features = ["full"] }
+tokio = { version = "1.38.0", default-features = false, features = ["rt", "macros", "sync", "time", "io-util"] }
 anyhow = "1.0.98"
 
 tower-lsp = "0.20.0"

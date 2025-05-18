@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::fs;
+use std::fs;
 use tokio::sync::Mutex;
 use tokio::time::{interval, Duration};
 
@@ -68,7 +68,7 @@ impl HeartbeatManager {
     pub async fn new() -> Result<Self> {
         let data_dir = get_zed_data_dir()?;
         if !data_dir.exists() {
-            fs::create_dir_all(&data_dir).await?;
+            fs::create_dir_all(&data_dir)?;
         }
         let offline_queue_path = data_dir.join(OFFLINE_QUEUE_FILE_NAME);
 
@@ -122,7 +122,7 @@ impl HeartbeatManager {
 
     async fn load_offline_heartbeats(&self) -> Result<()> {
         if self.offline_queue_path.exists() {
-            match fs::read_to_string(&self.offline_queue_path).await {
+            match fs::read_to_string(&self.offline_queue_path) {
                 Ok(data) => match serde_json::from_str::<VecDeque<Heartbeat>>(&data) {
                     Ok(heartbeats) => {
                         let mut queue = self.offline_heartbeats.lock().await;
@@ -134,7 +134,7 @@ impl HeartbeatManager {
                             "Error parsing offline heartbeats file: {}. Creating new queue.",
                             e
                         );
-                        fs::remove_file(&self.offline_queue_path).await.ok();
+                        let _ = fs::remove_file(&self.offline_queue_path);
                     }
                 },
                 Err(e) => {
@@ -148,7 +148,12 @@ impl HeartbeatManager {
     async fn save_offline_heartbeats(&self) -> Result<()> {
         let queue = self.offline_heartbeats.lock().await;
         let data = serde_json::to_string_pretty(&*queue)?;
-        fs::write(&self.offline_queue_path, data).await?;
+        if let Some(parent_dir) = self.offline_queue_path.parent() {
+            if !parent_dir.exists() {
+                fs::create_dir_all(parent_dir)?;
+            }
+        }
+        fs::write(&self.offline_queue_path, data)?;
         Ok(())
     }
 
@@ -256,7 +261,8 @@ impl HeartbeatManager {
         let mut queue = self.offline_heartbeats.lock().await;
         queue.push_back(heartbeat);
         log::debug!("Heartbeat added to offline queue. Size: {}", queue.len());
-        self.save_offline_heartbeats().await
+        let _ = self.save_offline_heartbeats().await;
+        Ok(())
     }
 
     pub async fn sync_offline_heartbeats(&self) -> Result<()> {

@@ -16,25 +16,20 @@ impl Extension for ZiitExtension {
 
     fn language_server_command(
         &mut self,
-        language_server_id: &LanguageServerId,
-        _worktree: &Worktree,
+        _language_server_id: &LanguageServerId,
+        worktree: &Worktree,
     ) -> Result<Command> {
-        if language_server_id.as_ref() != ZIIT_LANGUAGE_SERVER_NAME {
-            return Err("Unsupported language server".into());
-        }
-
-        let ls_binary_name = if cfg!(windows) {
-            "ziit-ls.exe"
-        } else {
-            "ziit-ls"
-        };
+        let ls_path = "server_bin/ziit-ls";
+        let command_path = worktree.which(ls_path).ok_or_else(|| {
+            format!("Failed to find the ziit-ls binary. Expected at: '{}'", ls_path)
+        })?;
 
         log::info!(
             "Requesting Zed to start language server: {}",
-            ls_binary_name
+            command_path
         );
         Ok(Command {
-            command: ls_binary_name.to_string(),
+            command: command_path,
             args: vec![],
             env: Default::default(),
         })

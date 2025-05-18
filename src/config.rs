@@ -1,6 +1,8 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::fs;
+use std::io::ErrorKind;
 
 const CONFIG_FILE_NAME: &str = ".ziit.json";
 
@@ -21,18 +23,35 @@ fn get_config_path() -> Result<PathBuf> {
 pub async fn read_config_file() -> Result<ZiitConfig> {
     let config_path = get_config_path()?;
     if !config_path.exists() {
+        if let Some(parent_dir) = config_path.parent() {
+            if !parent_dir.exists() {
+                fs::create_dir_all(parent_dir)?;
+            }
+        }
         return Ok(ZiitConfig::default());
     }
 
-    let content = tokio::fs::read_to_string(config_path).await?;
-    let config: ZiitConfig = serde_json::from_str(&content)?;
-    Ok(config)
+    match fs::read_to_string(config_path) {
+        Ok(content) => {
+            let config: ZiitConfig = serde_json::from_str(&content)?;
+            Ok(config)
+        }
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            Ok(ZiitConfig::default())
+        }
+        Err(e) => Err(anyhow::Error::from(e)),
+    }
 }
 
 pub async fn write_config_file(config: &ZiitConfig) -> Result<()> {
     let config_path = get_config_path()?;
+    if let Some(parent_dir) = config_path.parent() {
+        if !parent_dir.exists() {
+            fs::create_dir_all(parent_dir)?;
+        }
+    }
     let content = serde_json::to_string_pretty(config)?;
-    tokio::fs::write(config_path, content).await?;
+    fs::write(config_path, content)?;
     log::info!("Config file updated: {}", CONFIG_FILE_NAME);
     Ok(())
 }
