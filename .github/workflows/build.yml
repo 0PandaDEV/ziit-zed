@@ -31,39 +31,55 @@ jobs:
         env:
           CARGO_DIST_MANIFEST_PATH: ./dist-workspace.toml
 
-      - name: Collect artifacts
-        id: collect-artifacts
+      - name: Extract binaries
         run: |
-          mkdir -p artifacts
-          cp -r target/dist/* artifacts/ || true
-
-      - name: Upload combined artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: all-artifacts
-          path: artifacts
-          retention-days: 5
-
-      - name: Find individual binaries
-        run: |
-          for dir in artifacts/*; do
-            if [ -d "$dir" ]; then
-              target_name=$(basename "$dir")
-              echo "Processing $target_name"
-              mkdir -p "single-artifacts/$target_name"
-              
-              # Find the binary files and copy them
-              find "$dir" -type f -executable -o -name "*.exe" | while read binary; do
-                if [ -f "$binary" ]; then
-                  cp "$binary" "single-artifacts/$target_name/"
-                fi
-              done
+          mkdir -p binaries
+          
+          # Find and extract each architecture's binary
+          for target in aarch64-apple-darwin aarch64-unknown-linux-gnu x86_64-apple-darwin x86_64-unknown-linux-gnu x86_64-pc-windows-msvc; do
+            echo "Processing $target"
+            mkdir -p "binaries/$target"
+            
+            # Special handling for Windows
+            if [[ "$target" == *windows* ]]; then
+              find target/dist -path "*$target*" -name "*.exe" -exec cp {} "binaries/$target/" \;
+            else
+              # For Unix-like systems, find executable files
+              find target/dist -path "*$target*" -type f -executable -exec cp {} "binaries/$target/" \;
             fi
           done
 
-      - name: Upload individual artifacts
+      - name: Upload aarch64-darwin
         uses: actions/upload-artifact@v4
         with:
-          name: binaries-only
-          path: single-artifacts
+          name: aarch64-darwin
+          path: binaries/aarch64-apple-darwin
+          retention-days: 5
+          
+      - name: Upload aarch64-linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: aarch64-linux
+          path: binaries/aarch64-unknown-linux-gnu
+          retention-days: 5
+          
+      - name: Upload x86_64-darwin
+        uses: actions/upload-artifact@v4
+        with:
+          name: x86_64-darwin
+          path: binaries/x86_64-apple-darwin
+          retention-days: 5
+          
+      - name: Upload x86_64-linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: x86_64-linux
+          path: binaries/x86_64-unknown-linux-gnu
+          retention-days: 5
+          
+      - name: Upload x86_64-windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: x86_64-windows
+          path: binaries/x86_64-pc-windows-msvc
           retention-days: 5 
