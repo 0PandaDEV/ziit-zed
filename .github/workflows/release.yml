@@ -11,23 +11,28 @@ on:
   workflow_dispatch:
     inputs:
       version_tag:
-        description: 'Version tag (e.g. v0.1.0)'
+        description: 'Version tag (e.g. v1.0.0)'
         required: true
-        default: 'v0.1.0'
+        default: 'v1.0.0'
         type: string
       package_name:
         description: 'Package name (leave empty for workspace-wide release)'
         required: false
         default: 'ziit-ls'
         type: string
+      skip_version_check:
+        description: 'Skip version checking (use if tag version differs from Cargo.toml)'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      version_tag: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.version_tag || 'v0.1.0' }}
+      version_tag: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.version_tag || 'v1.0.0' }}
       package_name: ${{ github.event.inputs.package_name || 'ziit-ls' }}
-      full_tag: ${{ (github.event.inputs.package_name && format('{0}-{1}', github.event.inputs.package_name, github.event.inputs.version_tag || 'v0.1.0')) || github.event.inputs.version_tag || 'v0.1.0' }}
+      full_tag: ${{ (github.event.inputs.package_name && format('{0}-{1}', github.event.inputs.package_name, github.event.inputs.version_tag || 'v1.0.0')) || github.event.inputs.version_tag || 'v1.0.0' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -43,7 +48,7 @@ jobs:
       - name: Set release tag
         id: set_tag
         run: |
-          VERSION_TAG="${{ github.event_name == 'push' && github.ref_name || github.event.inputs.version_tag || 'v0.1.0' }}"
+          VERSION_TAG="${{ github.event_name == 'push' && github.ref_name || github.event.inputs.version_tag || 'v1.0.0' }}"
           PACKAGE_NAME="${{ github.event.inputs.package_name || 'ziit-ls' }}"
           
           if [ -n "$PACKAGE_NAME" ]; then
@@ -60,13 +65,27 @@ jobs:
 
       - name: Configure build
         run: |
-          dist host --steps=create --tag=${{ steps.set_tag.outputs.release_tag }} --output-format=json > dist-manifest.json
+          DIST_CMD="dist host --steps=create --tag=${{ steps.set_tag.outputs.release_tag }} --output-format=json"
+          
+          if [ "${{ github.event.inputs.skip_version_check }}" == "true" ]; then
+            DIST_CMD="$DIST_CMD --allow-dirty"
+          fi
+          
+          echo "Running: $DIST_CMD"
+          $DIST_CMD > dist-manifest.json
           echo "manifest=$(jq -c "." dist-manifest.json)" >> $GITHUB_OUTPUT
         id: config
 
       - name: Build artifacts
         run: |
-          dist build --tag=${{ steps.set_tag.outputs.release_tag }} --print=linkage --output-format=json > build-manifest.json
+          DIST_CMD="dist build --tag=${{ steps.set_tag.outputs.release_tag }} --print=linkage --output-format=json"
+          
+          if [ "${{ github.event.inputs.skip_version_check }}" == "true" ]; then
+            DIST_CMD="$DIST_CMD --allow-dirty"
+          fi
+          
+          echo "Running: $DIST_CMD"
+          $DIST_CMD > build-manifest.json
 
       - name: Upload manifests
         uses: actions/upload-artifact@v4
