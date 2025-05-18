@@ -10,7 +10,16 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -19,20 +28,32 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
-      - name: Build extension
-        run: cargo build --release --package ziit-ls
-        
-      - name: Prepare artifacts
-        id: prepare-artifacts
+      - name: Install cargo-dist
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-dist@0.28.0
+
+      - name: Build for target
+        run: cargo build --release --package ziit-ls --target ${{ matrix.target }}
+
+      - name: Prepare artifacts (Unix)
+        if: runner.os != 'Windows'
         run: |
           mkdir -p artifacts
-          cp -r target/release/* artifacts/ || true
-          echo "files_path=artifacts" >> $GITHUB_OUTPUT
+          cp target/${{ matrix.target }}/release/ziit-ls artifacts/
+          
+      - name: Prepare artifacts (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p artifacts
+          cp target/${{ matrix.target }}/release/ziit-ls.exe artifacts/
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: build-artifacts
-          path: ${{ steps.prepare-artifacts.outputs.files_path }}
+          name: ziit-ls-${{ matrix.target }}
+          path: artifacts
           retention-days: 5 
