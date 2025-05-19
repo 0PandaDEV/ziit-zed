@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::Path;
 use zed_extension_api::{self as zed, Command, Extension, LanguageServerId, Result, Worktree};
 
 struct ZiitExtension {
@@ -52,10 +53,10 @@ impl ZiitExtension {
             .ok_or_else(|| format!("no asset found matching {:?}", asset_name))?;
 
         let version_dir = format!("{binary}-{}", release.version);
-        let binary_path = if binary == "wakatime-cli" {
-            format!("{version_dir}/{target_triple}")
+        let binary_path = if target_triple.ends_with("pc-windows-msvc") && binary == "ziit-ls" {
+            Path::new(&version_dir).join(format!("{binary}.exe")).to_string_lossy().to_string()
         } else {
-            format!("{version_dir}/{binary}")
+            Path::new(&version_dir).join(binary).to_string_lossy().to_string()
         };
 
         if !fs::metadata(&binary_path).map_or(false, |stat| stat.is_file()) {
@@ -86,6 +87,11 @@ impl ZiitExtension {
 
         zed::make_file_executable(&binary_path)?;
 
+        if !fs::metadata(&binary_path).map_or(false, |stat| stat.is_file()) {
+            return Err(format!("Binary not available after download: {}", binary_path).into());
+        }
+
+        log::info!("Successfully prepared binary at: {}", binary_path);
         Ok(binary_path)
     }
 
@@ -99,23 +105,31 @@ impl ZiitExtension {
             &zed::LanguageServerInstallationStatus::CheckingForUpdate,
         );
 
-        if let Some(path) = worktree.which("ziit-ls") {
+        let ls_name = if cfg!(windows) { "ziit-ls.exe" } else { "ziit-ls" };
+        
+        log::debug!("Looking for language server binary: {}", ls_name);
+
+        if let Some(path) = worktree.which(ls_name) {
+            log::debug!("Found language server in PATH: {}", path);
             return Ok(path.clone());
         }
 
         let target_triple = self.target_triple("ziit-ls")?;
         if let Some(path) = worktree.which(&target_triple) {
+            log::debug!("Found language server via target triple: {}", path);
             return Ok(path.clone());
         }
 
         if let Some(path) = &self.cached_binary_path {
             if fs::metadata(path).map_or(false, |stat| stat.is_file()) {
+                log::debug!("Using cached language server path: {}", path);
                 return Ok(path.clone());
             }
         }
 
-        let binary_path =
-            self.download(language_server_id, "ziit-ls", "0PandaDEV/ziit-zed")?;
+        log::debug!("Downloading language server binary");
+        let binary_path = self.download(language_server_id, "ziit-ls", "0PandaDEV/ziit-zed")?;
+        log::debug!("Downloaded language server to: {}", binary_path);
 
         self.cached_binary_path = Some(binary_path.clone());
 
@@ -136,6 +150,12 @@ impl Extension for ZiitExtension {
         worktree: &Worktree,
     ) -> Result<Command> {
         let binary_path = self.language_server_binary_path(language_server_id, worktree)?;
+
+        if let Err(err) = fs::metadata(&binary_path) {
+            return Err(format!("Binary not found at path {}: {}", binary_path, err).into());
+        }
+
+        log::info!("Executing language server binary: {}", binary_path);
 
         let args = vec!["--standalone".to_string()];
 

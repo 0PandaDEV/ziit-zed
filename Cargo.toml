@@ -6,6 +6,7 @@ repository = "https://github.com/0pandadev/ziit-zed"
 
 [dependencies]
 zed_extension_api = "0.5.0"
+log = "0.4.27"
 
 [lib]
 path = "src/lib.rs"

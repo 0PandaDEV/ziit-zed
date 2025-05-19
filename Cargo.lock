@@ -1688,5 +1688,6 @@ dependencies = [
 name = "ziit-zed"
 version = "1.0.0"
 dependencies = [
+ "log",
  "zed_extension_api",
 ]
