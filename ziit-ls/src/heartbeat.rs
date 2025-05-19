@@ -86,18 +86,19 @@ impl HeartbeatManager {
         Ok(manager)
     }
 
-    pub fn start_background_tasks(self: &Arc<Self>) {
+    pub fn start_background_tasks(self: &Arc<Self>) -> Vec<tokio::task::JoinHandle<()>> {
+        let mut handles = Vec::new();
         let s = self.clone();
-        tokio::spawn(async move {
+        handles.push(tokio::spawn(async move {
             let mut timer = interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS));
             loop {
                 timer.tick().await;
                 s.handle_editor_activity(None, None, false).await;
             }
-        });
+        }));
 
         let s_sync = self.clone();
-        tokio::spawn(async move {
+        handles.push(tokio::spawn(async move {
             let mut timer = interval(Duration::from_secs(OFFLINE_SYNC_INTERVAL_SECONDS));
             loop {
                 timer.tick().await;
@@ -105,10 +106,10 @@ impl HeartbeatManager {
                     log::error!("Error syncing offline heartbeats: {}", e);
                 }
             }
-        });
+        }));
 
         let s_summary = self.clone();
-        tokio::spawn(async move {
+        handles.push(tokio::spawn(async move {
             let mut timer = interval(Duration::from_secs(DAILY_SUMMARY_INTERVAL_SECONDS));
             loop {
                 timer.tick().await;
@@ -116,8 +117,9 @@ impl HeartbeatManager {
                     log::error!("Error fetching daily summary: {}", e);
                 }
             }
-        });
+        }));
         log::info!("HeartbeatManager background tasks started.");
+        handles
     }
 
     async fn load_offline_heartbeats(&self) -> Result<()> {
@@ -145,7 +147,7 @@ impl HeartbeatManager {
         Ok(())
     }
 
-    async fn save_offline_heartbeats(&self) -> Result<()> {
+    pub async fn save_offline_heartbeats(&self) -> Result<()> {
         let queue = self.offline_heartbeats.lock().await;
         let data = serde_json::to_string_pretty(&*queue)?;
         if let Some(parent_dir) = self.offline_queue_path.parent() {

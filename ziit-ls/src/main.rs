@@ -28,6 +28,7 @@ struct ZiitLanguageServer {
     client: Client,
     heartbeat_manager_cell: Arc<OnceCell<Arc<HeartbeatManager>>>,
     last_heartbeat_info: Mutex<Option<LastHeartbeatInfo>>,
+    task_handles: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>
 }
 
 impl ZiitLanguageServer {
@@ -36,6 +37,7 @@ impl ZiitLanguageServer {
             client,
             heartbeat_manager_cell: Arc::new(OnceCell::new()),
             last_heartbeat_info: Mutex::new(None),
+            task_handles: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -220,9 +222,21 @@ impl LanguageServer for ZiitLanguageServer {
                 let hm_arc: Arc<HeartbeatManager> = Arc::new(hm);
 
                 let hm_clone_for_tasks: Arc<HeartbeatManager> = Arc::clone(&hm_arc);
-                tokio::spawn(async move {
-                    hm_clone_for_tasks.start_background_tasks();
-                });
+                let task_handles = hm_clone_for_tasks.start_background_tasks();
+                
+                match self.task_handles.lock().await {
+                    Ok(mut handles) => {
+                        handles.extend(task_handles);
+                    }
+                    Err(e) => {
+                        self.client
+                            .log_message(
+                                MessageType::ERROR,
+                                format!("Ziit LS: Failed to lock task handles mutex: {}", e),
+                            )
+                            .await;
+                    }
+                }
 
                 if self.heartbeat_manager_cell.set(hm_arc).is_err() {
                     self.client
@@ -275,6 +289,23 @@ impl LanguageServer for ZiitLanguageServer {
     }
 
     async fn shutdown(&self) -> jsonrpc::Result<()> {
+        if let Ok(mut handles) = self.task_handles.lock().await {
+            for handle in handles.drain(..) {
+                handle.abort();
+            }
+        }
+
+        if let Some(hm) = self.get_heartbeat_manager().await {
+            if let Err(e) = hm.save_offline_heartbeats().await {
+                self.client
+                    .log_message(
+                        MessageType::WARNING,
+                        format!("Failed to save offline heartbeats during shutdown: {}", e),
+                    )
+                    .await;
+            }
+        }
+
         self.client
             .log_message(MessageType::INFO, "Ziit LS: Shutdown requested.")
             .await;

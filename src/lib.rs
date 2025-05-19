@@ -7,19 +7,19 @@ struct ZiitExtension {
 }
 
 impl ZiitExtension {
-    fn target_triple(&self, binary: &str) -> Result<String, String> {
+    fn target_triple(&self) -> Result<String, String> {
         let (platform, arch) = zed::current_platform();
         let (arch, os) = {
             let arch = match arch {
-                zed::Architecture::Aarch64 if binary == "ziit-ls" => "aarch64",
-                zed::Architecture::X8664 if binary == "ziit-ls" => "x86_64",
+                zed::Architecture::Aarch64 => "aarch64",
+                zed::Architecture::X8664 => "x86_64",
                 _ => return Err(format!("unsupported architecture: {arch:?}")),
             };
 
             let os = match platform {
-                zed::Os::Mac if binary == "ziit-ls" => "apple-darwin",
-                zed::Os::Linux if binary == "ziit-ls" => "unknown-linux-gnu",
-                zed::Os::Windows if binary == "ziit-ls" => "pc-windows-msvc",
+                zed::Os::Mac => "apple-darwin",
+                zed::Os::Linux => "unknown-linux-gnu",
+                zed::Os::Windows => "pc-windows-msvc",
                 _ => return Err("unsupported platform".to_string()),
             };
 
@@ -28,6 +28,8 @@ impl ZiitExtension {
         
         Ok(format!("{}-{}", arch, os))
     }
+
+
 
     fn download(
         &self,
@@ -43,9 +45,8 @@ impl ZiitExtension {
             },
         )?;
 
-        let target_triple = self.target_triple(binary)?;
-
-        let asset_name = format!("{target_triple}.zip");
+        let target_triple = self.target_triple()?;
+        let asset_name = format!("{binary}-{target_triple}.zip");
         let asset = release
             .assets
             .iter()
@@ -53,7 +54,7 @@ impl ZiitExtension {
             .ok_or_else(|| format!("no asset found matching {:?}", asset_name))?;
 
         let version_dir = format!("{binary}-{}", release.version);
-        let binary_path = if target_triple.ends_with("pc-windows-msvc") && binary == "ziit-ls" {
+        let binary_path = if target_triple.ends_with("pc-windows-msvc") {
             Path::new(&version_dir).join(format!("{binary}.exe")).to_string_lossy().to_string()
         } else {
             Path::new(&version_dir).join(binary).to_string_lossy().to_string()
@@ -114,7 +115,7 @@ impl ZiitExtension {
             return Ok(path.clone());
         }
 
-        let target_triple = self.target_triple("ziit-ls")?;
+        let target_triple = self.target_triple()?;
         if let Some(path) = worktree.which(&target_triple) {
             log::debug!("Found language server via target triple: {}", path);
             return Ok(path.clone());
