@@ -50,7 +50,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Copy dist-workspace.toml
-        run: cp ziit-zed/dist-workspace.toml .
+        run: cp dist-workspace.toml .
 
       - name: Build all targets
         run: |
