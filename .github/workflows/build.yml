@@ -11,13 +11,13 @@ on:
   workflow_dispatch:
     inputs:
       version_tag:
-        description: 'Version tag (e.g. v1.0.0)'
+        description: "Version tag (e.g. v1.0.0)"
         required: true
-        default: 'v1.0.0'
+        default: "v1.0.0"
         type: string
 
 jobs:
-  build-linux:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -27,6 +27,16 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu,aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu,x86_64-pc-windows-msvc
+
+      - name: Install required dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu mingw-w64 gcc-multilib
+
+      - name: Install cargo-dist
+        run: cargo install cargo-dist --version 0.28.0
 
       - name: Get version
         id: get_version
@@ -38,183 +48,53 @@ jobs:
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Build Linux binary
-        run: cargo build --release --package ziit-ls
+      - name: Copy dist-workspace.toml
+        run: cp ziit-zed/dist-workspace.toml .
 
-      - name: Package binary
-        run: |
-          mkdir -p "ziit-ls-${{ steps.get_version.outputs.version }}"
-          cp target/release/ziit-ls "ziit-ls-${{ steps.get_version.outputs.version }}/"
-          zip -r "x86_64-unknown-linux-gnu.zip" "ziit-ls-${{ steps.get_version.outputs.version }}"
-
-      - name: Upload Linux artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: x86_64-unknown-linux-gnu
-          path: x86_64-unknown-linux-gnu.zip
-          retention-days: 5
-
-  build-linux-arm:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-unknown-linux-gnu
-
-      - name: Install ARM64 toolchain
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
-
-      - name: Get version
-        id: get_version
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            VERSION=${GITHUB_REF#refs/tags/}
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION=${{ github.event.inputs.version_tag }}
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Build Linux ARM binary
+      - name: Build all targets
         run: |
           export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-          cargo build --release --package ziit-ls --target aarch64-unknown-linux-gnu
+          cargo dist build --workspace-toml dist-workspace.toml --tag ${{ steps.get_version.outputs.version }}
 
-      - name: Package binary
+      - name: Package binaries
         run: |
-          mkdir -p "ziit-ls-${{ steps.get_version.outputs.version }}"
-          cp target/aarch64-unknown-linux-gnu/release/ziit-ls "ziit-ls-${{ steps.get_version.outputs.version }}/"
-          zip -r "aarch64-unknown-linux-gnu.zip" "ziit-ls-${{ steps.get_version.outputs.version }}"
+          mkdir -p artifacts
+          VERSION=${{ steps.get_version.outputs.version }}
 
-      - name: Upload Linux ARM artifact
+          # Linux x86_64
+          mkdir -p "ziit-ls-$VERSION-x86_64-unknown-linux-gnu"
+          cp target/x86_64-unknown-linux-gnu/release/ziit-ls "ziit-ls-$VERSION-x86_64-unknown-linux-gnu/"
+          zip -r "artifacts/x86_64-unknown-linux-gnu.zip" "ziit-ls-$VERSION-x86_64-unknown-linux-gnu"
+
+          # Linux ARM64
+          mkdir -p "ziit-ls-$VERSION-aarch64-unknown-linux-gnu"
+          cp target/aarch64-unknown-linux-gnu/release/ziit-ls "ziit-ls-$VERSION-aarch64-unknown-linux-gnu/"
+          zip -r "artifacts/aarch64-unknown-linux-gnu.zip" "ziit-ls-$VERSION-aarch64-unknown-linux-gnu"
+
+          # macOS x86_64
+          mkdir -p "ziit-ls-$VERSION-x86_64-apple-darwin"
+          cp target/x86_64-apple-darwin/release/ziit-ls "ziit-ls-$VERSION-x86_64-apple-darwin/"
+          zip -r "artifacts/x86_64-apple-darwin.zip" "ziit-ls-$VERSION-x86_64-apple-darwin"
+
+          # macOS ARM64
+          mkdir -p "ziit-ls-$VERSION-aarch64-apple-darwin"
+          cp target/aarch64-apple-darwin/release/ziit-ls "ziit-ls-$VERSION-aarch64-apple-darwin/"
+          zip -r "artifacts/aarch64-apple-darwin.zip" "ziit-ls-$VERSION-aarch64-apple-darwin"
+
+          # Windows x86_64
+          mkdir -p "ziit-ls-$VERSION-x86_64-pc-windows-msvc"
+          cp target/x86_64-pc-windows-msvc/release/ziit-ls.exe "ziit-ls-$VERSION-x86_64-pc-windows-msvc/"
+          zip -r "artifacts/x86_64-pc-windows-msvc.zip" "ziit-ls-$VERSION-x86_64-pc-windows-msvc"
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: aarch64-unknown-linux-gnu
-          path: aarch64-unknown-linux-gnu.zip
-          retention-days: 5
-
-  build-macos:
-    runs-on: macos-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Get version
-        id: get_version
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            VERSION=${GITHUB_REF#refs/tags/}
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION=${{ github.event.inputs.version_tag }}
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Build macOS binary
-        run: cargo build --release --package ziit-ls
-
-      - name: Package binary
-        run: |
-          mkdir -p "ziit-ls-${{ steps.get_version.outputs.version }}"
-          cp target/release/ziit-ls "ziit-ls-${{ steps.get_version.outputs.version }}/"
-          zip -r "x86_64-apple-darwin.zip" "ziit-ls-${{ steps.get_version.outputs.version }}"
-
-      - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: x86_64-apple-darwin
-          path: x86_64-apple-darwin.zip
-          retention-days: 5
-
-  build-macos-arm:
-    runs-on: macos-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
-
-      - name: Get version
-        id: get_version
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            VERSION=${GITHUB_REF#refs/tags/}
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION=${{ github.event.inputs.version_tag }}
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Build macOS ARM binary
-        run: cargo build --release --package ziit-ls --target aarch64-apple-darwin
-
-      - name: Package binary
-        run: |
-          mkdir -p "ziit-ls-${{ steps.get_version.outputs.version }}"
-          cp target/aarch64-apple-darwin/release/ziit-ls "ziit-ls-${{ steps.get_version.outputs.version }}/"
-          zip -r "aarch64-apple-darwin.zip" "ziit-ls-${{ steps.get_version.outputs.version }}"
-
-      - name: Upload macOS ARM artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: aarch64-apple-darwin
-          path: aarch64-apple-darwin.zip
-          retention-days: 5
-
-  build-windows:
-    runs-on: windows-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Get version
-        id: get_version
-        shell: bash
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            VERSION=${GITHUB_REF#refs/tags/}
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION=${{ github.event.inputs.version_tag }}
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Build Windows binary
-        run: cargo build --release --package ziit-ls
-
-      - name: Package binary
-        shell: bash
-        run: |
-          mkdir -p "ziit-ls-${{ steps.get_version.outputs.version }}"
-          cp target/release/ziit-ls.exe "ziit-ls-${{ steps.get_version.outputs.version }}/"
-          7z a -tzip "x86_64-pc-windows-msvc.zip" "ziit-ls-${{ steps.get_version.outputs.version }}"
-
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: x86_64-pc-windows-msvc
-          path: x86_64-pc-windows-msvc.zip
+          name: all-artifacts
+          path: artifacts/*.zip
           retention-days: 5
 
   release:
-    needs: [build-linux, build-linux-arm, build-macos, build-macos-arm, build-windows]
+    needs: [build]
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
@@ -228,11 +108,11 @@ jobs:
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
+          name: all-artifacts
           path: artifacts
-          merge-multiple: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -245,4 +125,4 @@ jobs:
             artifacts/x86_64-apple-darwin.zip
             artifacts/aarch64-apple-darwin.zip
             artifacts/x86_64-pc-windows-msvc.zip
-          generate_release_notes: true 
+          generate_release_notes: true
