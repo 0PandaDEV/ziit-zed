@@ -49,9 +49,6 @@ jobs:
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Copy dist-workspace.toml
-        run: cp dist-workspace.toml .
-
       - name: Build all targets
         run: |
           export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
