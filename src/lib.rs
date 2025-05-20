@@ -20,7 +20,6 @@ impl ZiitExtension {
                 zed::Os::Mac => "apple-darwin",
                 zed::Os::Linux => "unknown-linux-gnu",
                 zed::Os::Windows => "pc-windows-msvc",
-                _ => return Err("unsupported platform".to_string()),
             };
 
             (arch, os)
