@@ -6,9 +6,9 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::fs;
 use tokio::sync::Mutex;
 use tokio::time::{interval, Duration};
 
@@ -57,20 +57,78 @@ pub struct HeartbeatManager {
     has_valid_api_key: Arc<Mutex<bool>>,
 }
 
-fn get_zed_data_dir() -> Result<PathBuf> {
+fn get_config_dir() -> Result<PathBuf> {
+    if let Ok(xdg_config_home) = std::env::var("XDG_CONFIG_HOME") {
+        if !xdg_config_home.is_empty() {
+            return Ok(PathBuf::from(xdg_config_home).join("ziit"));
+        }
+    }
+
     let home_dir =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
-    let ziit_dir = home_dir.join(".ziit");
-    Ok(ziit_dir)
+    Ok(home_dir.join(".config").join("ziit"))
+}
+
+fn get_legacy_offline_path() -> Result<PathBuf> {
+    let home_dir =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+    Ok(home_dir.join(".ziit").join(OFFLINE_QUEUE_FILE_NAME))
+}
+
+fn migrate_offline_heartbeats(new_offline_path: &PathBuf) -> Result<()> {
+    let legacy_path = get_legacy_offline_path()?;
+
+    if legacy_path.exists() && !new_offline_path.exists() {
+        log::info!(
+            "Migrating offline heartbeats from {:?} to {:?}",
+            legacy_path,
+            new_offline_path
+        );
+
+        if let Some(parent_dir) = new_offline_path.parent() {
+            if !parent_dir.exists() {
+                fs::create_dir_all(parent_dir)?;
+            }
+        }
+
+        fs::copy(&legacy_path, new_offline_path)?;
+
+        if let Err(e) = fs::remove_file(&legacy_path) {
+            log::warn!("Could not remove legacy offline heartbeats file: {}", e);
+        } else {
+            log::info!("Successfully migrated offline heartbeats and removed legacy file");
+        }
+
+        if let Some(legacy_dir) = legacy_path.parent() {
+            if legacy_dir.exists() {
+                if let Ok(entries) = fs::read_dir(legacy_dir) {
+                    let is_empty = entries.count() == 0;
+                    if is_empty {
+                        if let Err(e) = fs::remove_dir(legacy_dir) {
+                            log::debug!("Could not remove empty legacy directory: {}", e);
+                        } else {
+                            log::info!("Removed empty legacy directory: {:?}", legacy_dir);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 impl HeartbeatManager {
     pub async fn new() -> Result<Self> {
-        let data_dir = get_zed_data_dir()?;
-        if !data_dir.exists() {
-            fs::create_dir_all(&data_dir)?;
+        let config_dir = get_config_dir()?;
+        if !config_dir.exists() {
+            fs::create_dir_all(&config_dir)?;
         }
-        let offline_queue_path = data_dir.join(OFFLINE_QUEUE_FILE_NAME);
+        let offline_queue_path = config_dir.join(OFFLINE_QUEUE_FILE_NAME);
+
+        if let Err(e) = migrate_offline_heartbeats(&offline_queue_path) {
+            log::warn!("Failed to migrate offline heartbeats: {}", e);
+        }
 
         let manager = Self {
             last_heartbeat_time: Arc::new(Mutex::new(None)),
