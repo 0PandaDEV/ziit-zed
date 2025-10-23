@@ -2,6 +2,8 @@ use crate::api::{
     fetch_daily_summary_request, send_batch_heartbeats_request, send_heartbeat_request,
 };
 use crate::config::{get_api_key, get_base_url};
+use crate::language::{detect_language, extract_file_name};
+use crate::project::{detect_branch, detect_project};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -19,13 +21,13 @@ const OFFLINE_QUEUE_FILE_NAME: &str = "offline_heartbeats.json";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Heartbeat {
-    timestamp: String,
-    project: Option<String>,
-    language: Option<String>,
-    file: Option<String>,
-    branch: Option<String>,
-    editor: String,
-    os: String,
+    pub timestamp: String,
+    pub project: Option<String>,
+    pub language: Option<String>,
+    pub file: Option<String>,
+    pub branch: Option<String>,
+    pub editor: String,
+    pub os: String,
 }
 
 impl Heartbeat {
@@ -36,7 +38,7 @@ impl Heartbeat {
         branch: Option<String>,
     ) -> Self {
         Self {
-            timestamp: Utc::now().to_rfc3339(),
+            timestamp: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
             project,
             language,
             file,
@@ -245,8 +247,31 @@ impl HeartbeatManager {
         language_id: Option<String>,
         force_send: bool,
     ) {
-        let project_name = None;
-        let branch_name = None;
+        log::info!(
+            "handle_editor_activity called with file_path: {:?}",
+            file_path
+        );
+        log::info!(
+            "handle_editor_activity called with language_id: {:?}",
+            language_id
+        );
+
+        if file_path.is_none() && !force_send {
+            log::debug!("Skipping heartbeat: no file path and not forced");
+            return;
+        }
+
+        let project_name = detect_project(file_path.as_deref());
+        log::info!("Detected project: {:?}", project_name);
+
+        let branch_name = detect_branch(file_path.as_deref());
+        log::info!("Detected branch: {:?}", branch_name);
+
+        let language = language_id.or_else(|| detect_language(file_path.as_deref()));
+        log::info!("Detected language: {:?}", language);
+
+        let file_name = extract_file_name(file_path.as_deref());
+        log::info!("Extracted file name: {:?}", file_name);
 
         let mut last_hb_time = self.last_heartbeat_time.lock().await;
         let mut last_f = self.last_file.lock().await;
@@ -267,7 +292,19 @@ impl HeartbeatManager {
 
         if force_send || file_changed || time_threshold_passed {
             log::info!("Sufficient activity, attempting to send heartbeat.");
-            let heartbeat = Heartbeat::new(project_name, language_id, file_path, branch_name);
+            log::debug!(
+                "Heartbeat details - Project: {:?}, Language: {:?}, File: {:?}, Branch: {:?}",
+                project_name,
+                language,
+                file_name,
+                branch_name
+            );
+            let heartbeat = Heartbeat::new(project_name, language, file_name, branch_name);
+
+            if let Ok(json) = serde_json::to_string_pretty(&heartbeat) {
+                log::info!("Heartbeat JSON payload:\n{}", json);
+            }
+
             if let Err(e) = self.process_heartbeat(heartbeat).await {
                 log::error!("Error processing heartbeat: {}", e);
             }

@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::Path;
-use zed_extension_api::{self as zed, Command, Extension, LanguageServerId, Result, Worktree};
+use zed_extension_api::{
+    self as zed, settings::LspSettings, Command, Extension, LanguageServerId, Result, Worktree,
+};
 
 struct ZiitExtension {
     cached_binary_path: Option<String>,
@@ -24,11 +26,9 @@ impl ZiitExtension {
 
             (arch, os)
         };
-        
+
         Ok(format!("{}-{}", arch, os))
     }
-
-
 
     fn download(
         &self,
@@ -54,9 +54,15 @@ impl ZiitExtension {
 
         let version_dir = format!("{binary}-{}", release.version);
         let binary_path = if target_triple.ends_with("pc-windows-msvc") {
-            Path::new(&version_dir).join(format!("{binary}.exe")).to_string_lossy().to_string()
+            Path::new(&version_dir)
+                .join(format!("{binary}.exe"))
+                .to_string_lossy()
+                .to_string()
         } else {
-            Path::new(&version_dir).join(binary).to_string_lossy().to_string()
+            Path::new(&version_dir)
+                .join(binary)
+                .to_string_lossy()
+                .to_string()
         };
 
         if !fs::metadata(&binary_path).map_or(false, |stat| stat.is_file()) {
@@ -100,14 +106,53 @@ impl ZiitExtension {
         language_server_id: &LanguageServerId,
         worktree: &Worktree,
     ) -> Result<String> {
-        zed::set_language_server_installation_status(
-            language_server_id,
-            &zed::LanguageServerInstallationStatus::CheckingForUpdate,
-        );
+        let ls_name = if cfg!(windows) {
+            "ziit-ls.exe"
+        } else {
+            "ziit-ls"
+        };
 
-        let ls_name = if cfg!(windows) { "ziit-ls.exe" } else { "ziit-ls" };
-        
         log::debug!("Looking for language server binary: {}", ls_name);
+
+
+
+        let dev_paths = vec![
+            format!(
+                "/home/pandadev/Developer/Extensions/ziit-zed/ziit-ls/target/release/{}",
+                ls_name
+            ),
+            format!(
+                "/home/pandadev/Developer/Extensions/ziit-zed/target/release/{}",
+                ls_name
+            ),
+        ];
+
+        for dev_path in &dev_paths {
+            if fs::metadata(dev_path).map_or(false, |stat| stat.is_file()) {
+                log::info!("Using local development binary at: {}", dev_path);
+                return Ok(dev_path.clone());
+            }
+        }
+
+
+        let worktree_root = worktree.root_path();
+        let local_binary = format!("{}/target/release/{}", worktree_root, ls_name);
+        if fs::metadata(&local_binary).map_or(false, |stat| stat.is_file()) {
+            log::info!(
+                "Using local development binary from worktree at: {}",
+                local_binary
+            );
+            return Ok(local_binary);
+        }
+
+        let local_binary_subdir = format!("{}/ziit-ls/target/release/{}", worktree_root, ls_name);
+        if fs::metadata(&local_binary_subdir).map_or(false, |stat| stat.is_file()) {
+            log::info!(
+                "Using local development binary from worktree subdir at: {}",
+                local_binary_subdir
+            );
+            return Ok(local_binary_subdir);
+        }
 
         if let Some(path) = worktree.which(ls_name) {
             log::debug!("Found language server in PATH: {}", path);
@@ -127,7 +172,31 @@ impl ZiitExtension {
             }
         }
 
-        log::debug!("Downloading language server binary");
+        if let Ok(entries) = fs::read_dir(".") {
+            for entry in entries.flatten() {
+                if let Some(dir_name) = entry.file_name().to_str() {
+                    if dir_name.starts_with("ziit-ls-v") {
+                        let potential_binary = entry.path().join(ls_name);
+                        if potential_binary.exists() && potential_binary.is_file() {
+                            let binary_path_str = potential_binary.to_string_lossy().to_string();
+                            log::info!(
+                                "Found existing language server binary at: {}",
+                                binary_path_str
+                            );
+                            self.cached_binary_path = Some(binary_path_str.clone());
+                            return Ok(binary_path_str);
+                        }
+                    }
+                }
+            }
+        }
+
+        zed::set_language_server_installation_status(
+            language_server_id,
+            &zed::LanguageServerInstallationStatus::CheckingForUpdate,
+        );
+
+        log::debug!("Downloading language server binary from GitHub");
         let binary_path = self.download(language_server_id, "ziit-ls", "0PandaDEV/ziit-zed")?;
         log::debug!("Downloaded language server to: {}", binary_path);
 
@@ -164,6 +233,73 @@ impl Extension for ZiitExtension {
             args,
             env: worktree.shell_env(),
         })
+    }
+
+    fn language_server_initialization_options(
+        &mut self,
+        _language_server_id: &LanguageServerId,
+        worktree: &Worktree,
+    ) -> Result<Option<zed::serde_json::Value>> {
+        let settings = LspSettings::for_worktree("ziit-ls", worktree)
+            .ok()
+            .and_then(|lsp_settings| lsp_settings.initialization_options.clone());
+
+        if let Some(options) = &settings {
+            log::info!(
+                "Passing initialization options to language server: {:?}",
+                options
+            );
+            return Ok(Some(options.clone()));
+        }
+
+        log::warn!("No initialization options found in Zed settings.");
+        log::info!("Attempting to read config from XDG config directory as fallback...");
+
+        let config_path = if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME") {
+            if !xdg_config.is_empty() {
+                format!("{}/ziit/config.json", xdg_config)
+            } else {
+                format!(
+                    "{}/.config/ziit/config.json",
+                    std::env::var("HOME").unwrap_or_default()
+                )
+            }
+        } else {
+            format!(
+                "{}/.config/ziit/config.json",
+                std::env::var("HOME").unwrap_or_default()
+            )
+        };
+
+        if let Ok(config_content) = std::fs::read_to_string(&config_path) {
+            if let Ok(config_json) =
+                zed::serde_json::from_str::<zed::serde_json::Value>(&config_content)
+            {
+                log::info!("Successfully read config from file: {}", config_path);
+                log::info!("Config from file: {:?}", config_json);
+                return Ok(Some(config_json));
+            }
+        }
+
+        log::warn!("Could not read config from file: {}", config_path);
+        log::warn!(
+            "Please configure apiKey either in Zed settings or in {}",
+            config_path
+        );
+
+        Ok(None)
+    }
+
+    fn language_server_workspace_configuration(
+        &mut self,
+        _language_server_id: &LanguageServerId,
+        worktree: &Worktree,
+    ) -> Result<Option<zed::serde_json::Value>> {
+        let settings = LspSettings::for_worktree("ziit-ls", worktree)
+            .ok()
+            .and_then(|lsp_settings| lsp_settings.settings.clone());
+
+        Ok(settings)
     }
 }
 

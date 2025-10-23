@@ -5,8 +5,8 @@ edition = "2021"
 repository = "https://github.com/0pandadev/ziit-zed"
 
 [dependencies]
-zed_extension_api = "0.5.0"
-log = "0.4.27"
+zed_extension_api = "0.7.0"
+log = "0.4.28"
 
 [lib]
 path = "src/lib.rs"
