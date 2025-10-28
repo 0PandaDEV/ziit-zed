@@ -28,7 +28,7 @@ pub async fn send_heartbeat_request(
     api_key: &str,
     heartbeat: Heartbeat,
 ) -> Result<()> {
-    let url = format!("{}/api/external/heartbeats", base_url);
+    let url = format!("{}/api/external/heartbeat", base_url);
     let client = reqwest::Client::new();
 
     log::debug!("Sending heartbeat to: {}", url);
